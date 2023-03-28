@@ -1,4 +1,4 @@
-window.addEventListener('load', () => {
+window.addEventListener('load', function() {
   initDT(); // Initialize the DatatTable and window.columnNames variables
   AddDarkModeWidget();
   Options.loadAndShow();
@@ -16,7 +16,8 @@ window.addEventListener('load', () => {
         document.getElementById('token').value = authToken;
       }
     }
-  } catch {}
+  } catch {
+  }
 
   if (repo) {
     document.getElementById('q').value = repo;
@@ -32,7 +33,7 @@ function getQueryVariableFromUrl(variable) {
   }
   return null;
 }
-document.getElementById('form').addEventListener('submit', (e) => {
+document.getElementById('form').addEventListener('submit', function(e) {
   e.preventDefault();
   fetchData();
 });
@@ -89,13 +90,17 @@ function updateDT(data) {
   // Format dataset and redraw DataTable. Use second index for key name
   const forks = [];
   for (let fork of data) {
+    console.log(fork)
     fork.repoLink = `<a href="https://github.com/${fork.full_name}" target="_blank" rel="noopener noreferrer">${fork.full_name}</a>`;
     fork.ownerName = `<a href="https://github.com/${fork.owner.login}" target="_blank" rel="noopener noreferrer">${fork.owner.login}</a>`;
     fork.avatar = `<img src="${fork.owner.avatar_url}" alt="Avatar" class="avatar">`
     forks.push(fork);
   }
-  const dataSet = forks.map((fork) =>
-    window.columnNamesMap.map((colNM) => fork[colNM[1]])
+  const dataSet = forks.map(function(fork) {
+      return window.columnNamesMap.map(function(colNM) {
+        return fork[colNM[1]];
+      });
+    },
   );
   window.forkTable.clear().rows.add(dataSet).draw();
 }
@@ -122,16 +127,18 @@ function initDT() {
   // Sort by stars:
   const sortColName = 'Last Push';
   const sortColumnIdx = window.columnNamesMap
-    .map((pair) => pair[0])
+    .map(function(pair) {
+      return pair[0];
+    })
     .indexOf(sortColName);
 
   // Use first index for readable column name
   // we use moment's fromNow() if we are rendering for `pushed_at`; better solution welcome
   window.forkTable = $('#forkTable').DataTable({
-    columns: window.columnNamesMap.map((colNM) => {
+    columns: window.columnNamesMap.map(function(colNM) {
       return {
         title: colNM[0],
-        render: (data, type, _row) => {
+        render: function(data, type, _row) {
           switch (colNM[1]) {
             case 'pushed_at':
               return type === 'display'
@@ -169,32 +176,37 @@ async function fetchAndShow(repo) {
   const token = document.getElementById('token').value;
   localStorage.setItem('token', token);
   const api = Api(token);
+  const { maxRecords, ignoreUnchangedForks } = Options.getAndSave();
 
-  const data = [];
+  let data = [];
   try {
-    const maxRecords = Options.getAndSave().maxRecords;
 
-    const singleLimiter = (fork) => ({
-      full_name: fork.full_name,
-      name: fork.name,
-      default_branch: fork.default_branch,
-      stargazers_count: fork.stargazers_count,
-      forks: fork.forks,
-      open_issues_count: fork.open_issues_count,
-      size: humanFileSize(fork.size * 1000),
-      pushed_at: fork.pushed_at,
-      owner: {
-        login: fork.owner.login,
-        avatar_url: fork.owner.avatar_url
-      },
-    });
+    const singleLimiter = function(fork) {
+      return {
+        full_name: fork.full_name,
+        name: fork.name,
+        default_branch: fork.default_branch,
+        stargazers_count: fork.stargazers_count,
+        forks: fork.forks,
+        open_issues_count: fork.open_issues_count,
+        size: humanFileSize(fork.size * 1000),
+        pushed_at: fork.pushed_at,
+        owner: {
+          login: fork.owner.login,
+          avatar_url: fork.owner.avatar_url,
+        },
+      };
+    };
 
-    const multiLimiter = (data) => data.map(singleLimiter);
+    const multiLimiter = function(data) {
+      return data.map(singleLimiter);
+    };
 
     const originalRepo = await api.fetch(
       `https://api.github.com/repos/${repo}`,
       singleLimiter
     );
+
     originalRepo.diff_from_original = originalRepo.diff_to_original = '0';
     const originalBranch = originalRepo.default_branch;
     data.push(originalRepo);
@@ -202,9 +214,14 @@ async function fetchAndShow(repo) {
     let page = 1;
     while (data.length - 1 < maxRecords) {
       const url = `https://api.github.com/repos/${repo}/forks?sort=stargazers&per_page=${maxRecords}&page=${page}`;
-      const someData = await api.fetch(url, multiLimiter);
+      let someData = await api.fetch(url, multiLimiter);
 
       if (someData.length === 0) break;
+      if (ignoreUnchangedForks === true) {
+        someData = someData.filter(function(fork) {
+          return fork.pushed_at !== originalRepo.pushed_at;
+        });
+      }
       data.push(...someData);
       ++page;
     }
@@ -215,6 +232,14 @@ async function fetchAndShow(repo) {
   }
 
   try {
+    if (ignoreUnchangedForks === true) {
+      data = data.filter(function(fork) {
+        return fork.diff_to_original !== '0';
+      });
+    }
+    data = data.filter(function(fork) {
+      return fork.exists !== false;
+    });
     updateDT(data, repo);
   } catch (error) {
     console.error(error);
@@ -248,7 +273,9 @@ function getRepoFromUrl() {
 
 async function updateData(repo, originalBranch, forks, api) {
   forks.forEach(
-    (fork) => (fork.diff_from_original = fork.diff_to_original = '')
+    function(fork) {
+      return fork.diff_from_original = fork.diff_to_original = '';
+    },
   );
 
   let index = 1;
@@ -293,25 +320,31 @@ async function fetchMoreDir(repo, originalBranch, fork, fromOriginal, api) {
     ? `https://api.github.com/repos/${repo}/compare/${fork.owner.login}:${fork.default_branch}...${originalBranch}`
     : `https://api.github.com/repos/${repo}/compare/${originalBranch}...${fork.owner.login}:${fork.default_branch}`;
 
-  const limiter = (data) => ({
-    commits: data.commits.map((c) => ({
-      sha: c.sha.substr(0, 6),
-      commit: {
-        author: {
-          date: c.commit.author.date,
-        },
-        message: c.commit.message,
-      },
-      author: {
-        login: c.author ? c.author.login : undefined,
-      },
-    })),
-  });
+  const limiter = function(data) {
+    return {
+      commits: data.commits.map(function(c) {
+        return {
+          sha: c.sha.substr(0, 6),
+          commit: {
+            author: {
+              date: c.commit.author.date,
+            },
+            message: c.commit.message,
+          },
+          author: {
+            login: c.author ? c.author.login : undefined,
+          },
+        };
+      }),
+    };
+  };
   const data = await api.fetch(url, limiter);
 
   if (data !== null) {
     if (fromOriginal) fork.diff_from_original = printInfo('-', data, fork);
     else fork.diff_to_original = printInfo('+', data, fork);
+  } else {
+    fork.exists = false
   }
 }
 
@@ -322,20 +355,23 @@ function printInfo(sep, data, fork) {
   const details =
     '<pre>' +
     data.commits
-      .map((c) => {
+      .map(function(c) {
         c.author_date = c.commit.author.date.replace('Z', '').replace('T', ' ');
         c.author_login = c.author && c.author.login ? c.author.login : '-';
         const sha = c.sha.substr(0, 6);
-        c.link = `<a href="https://github.com/${fork.owner.login}/${fork.name}/commit/${sha}">${sha}</a>`;
+        c.link = `<a href='https://github.com/${fork.owner.login}/${fork.name}/commit/${sha}'>${sha}</a>`;
         return c;
       })
       .map(
-        (c) =>
-          `${c.link} ${c.author_date.substr(0, 10)} ${c.author_login} - ${
+        function(c) {
+          return `${c.link} ${c.author_date.substr(0, 10)} ${c.author_login} - ${
             c.commit.message
-          }`
+          }`;
+        },
       )
-      .map((s) => s.replace(/[\n\r]/g, ' ').substr(0, 150))
+      .map(function(s) {
+        return s.replace(/[\n\r]/g, ' ').substr(0, 150);
+      })
       .join('\n')
       .replace(/&/g, '&amp;')
       .replace(/"/g, '&quot;')
@@ -406,9 +442,15 @@ function Api(token) {
     try {
       const { cached, newConfig } = cache.get(url, config);
       const response = await fetch(url, newConfig);
-      if (response.status === 304) return cached.data;
-      if (response.status === 404) return null;
-      if (!response.ok) throw Error(response.statusText);
+      switch (response.status){
+        case 304:
+          return cached.data;
+        case 404:
+          return null;
+      }
+      if (!response.ok) {
+        throw Error(response.statusText);
+      }
 
       updateRate(response);
 
@@ -509,11 +551,13 @@ const Options = {
   loadAndShow: function () {
     const options_button = $('.options-button');
     $('#options')
-      .on('show.bs.collapse', () =>
-        options_button.addClass('options-button--expanded')
+      .on('show.bs.collapse', function() {
+          return options_button.addClass('options-button--expanded');
+        },
       )
-      .on('hide.bs.collapse', () =>
-        options_button.removeClass('options-button--expanded')
+      .on('hide.bs.collapse', function() {
+          return options_button.removeClass('options-button--expanded');
+        },
       );
 
     try {
@@ -522,11 +566,13 @@ const Options = {
         sameSize: true,
         samePushDate: true,
         maxRecords: 100,
+        ignoreUnchangedForks: true,
       };
 
       $('#sameSize').attr('checked', saved.sameSize);
       $('#samePushDate').attr('checked', saved.samePushDate);
       $('#maxRecords').val(saved.maxRecords);
+      $('#ignoreUnchangedForks').attr('checked', saved.ignoreUnchangedForks);
     } catch {}
   },
 
@@ -534,8 +580,9 @@ const Options = {
     const sameSize = $('#sameSize').is(':checked');
     const samePushDate = $('#samePushDate').is(':checked');
     const maxRecords = $('#maxRecords').val();
+    const ignoreUnchangedForks = $('#ignoreUnchangedForks').is(':checked');
 
-    const val = { sameSize, samePushDate, maxRecords };
+    const val = { sameSize, samePushDate, maxRecords, ignoreUnchangedForks };
     try {
       localStorage.setItem('options', JSON.stringify(val));
     } catch {}
@@ -598,7 +645,7 @@ function humanFileSize(bytes, si = true, dp = 1) {
   } while (
     Math.round(Math.abs(bytes) * r) / r >= thresh &&
     u < units.length - 1
-  );
+    );
 
   return bytes.toFixed(dp) + ' ' + units[u];
 }
